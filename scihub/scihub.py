@@ -13,6 +13,8 @@ import logging
 import hashlib
 import argparse
 import requests
+import cookielib
+import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -24,6 +26,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 SCIHUB_BASE_URL = 'https://sci-hub.cc/'
 SCHOLARS_BASE_URL = 'https://scholar.google.com/scholar'
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
+SCIHUB_CAPTCHA_HTML = '<img id="captcha"'
 
 class SciHub(object):
     """
@@ -134,11 +137,27 @@ class SciHub(object):
         Sci-Hub embeds papers in an iframe. This function finds the actual
         source url which looks something like https://moscow.sci-hub.io/.../....pdf.
         """
-        res = requests.get(SCIHUB_BASE_URL + identifier, headers=HEADERS, verify=False)
-        s = self._get_soup(res.content)
-        iframe = s.find('iframe')
+        url = identifier
+        if 'nlm.nih.gov' in identifier:
+            res = requests.get(identifier, headers=HEADERS)
+            s = self._get_soup(res.content)
+            a = s.select_one('.portlet a')
+            if not a: return
+            url = a.get('href').replace('http://sci-hub.cc/', '').replace('https://sci-hub.cc/', '')
+            
+        jar = cookielib.CookieJar()
+
+        r2 = requests.get(url if 'scielo.br' in url else SCIHUB_BASE_URL + url, headers=HEADERS, cookies=jar, verify=False)
+        if SCIHUB_CAPTCHA_HTML in r2.content: return 'scihubcaptcha'
+        s2 = self._get_soup(r2.content)
+        iframe = s2.select_one('iframe#pdf')
         if iframe:
             return iframe.get('src')
+            
+        pdf = s2.select_one('a[href$=".pdf"]')
+        if pdf:
+            return urlparse.urljoin(r2.url, pdf.get('href'))
+        
 
     def _classify(self, identifier):
         """
