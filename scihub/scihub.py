@@ -161,6 +161,12 @@ class SciHub(object):
         """
         url = self._get_direct_url(identifier)
 
+        if url == 'scihubcaptcha':
+            return {
+                'err': 'Failed to fetch pdf with identifier %s due to scihubcaptcha' 
+                   % (identifier)
+              }
+
         try:
             # verify=False is dangerous but sci-hub.io 
             # requires intermediate certificates to verify
@@ -168,6 +174,11 @@ class SciHub(object):
             # as a hacky fix, you can add them to your store
             # and verifying would work. will fix this later.
             res = requests.get(url, headers=HEADERS, verify=False)
+            if SCIHUB_CAPTCHA_HTML in res.content:
+              return {
+                'err': 'Failed to fetch pdf with identifier %s (resolved url %s) due to %s' 
+                   % (identifier, url, 'scihubcaptcha')
+              }
             return {
                 'pdf': res.content,
                 'url': url,
@@ -177,8 +188,8 @@ class SciHub(object):
             }
         except requests.exceptions.RequestException as e:
             return {
-                'err': 'Failed to fetch pdf with identifier %s (resolved url %s) due to %s' 
-                   % (identifier, url, 'failed connection' if url else 'captcha')
+                'err': 'Failed to fetch pdf with identifier %s (resolved url %s) due to %s: %s' 
+                   % (identifier, url, 'failed connection' if url else ('scihubcaptcha' if e.response and e.response.content and SCIHUB_CAPTCHA_HTML in e.response.content else 'captcha'), e)
             }
 
     def _get_direct_url(self, identifier):
