@@ -13,6 +13,7 @@ import logging
 import hashlib
 import argparse
 import requests
+import json
 import cookielib
 import urlparse
 
