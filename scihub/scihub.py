@@ -181,6 +181,15 @@ class SciHub(object):
         pdf_hash = hashlib.md5(res.content).hexdigest()
         return '%s-%s' % (pdf_hash, name[-20:])
 
+    def _read_json(self, path):
+        with open(path, 'r') as infile:
+             return json.load(infile)
+
+    def _write_json(self, path, data):
+        with open(path, 'w') as outfile:
+             return json.dump(data, outfile)
+
+
 def main():
     sh = SciHub()
 
