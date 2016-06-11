@@ -83,21 +83,77 @@ class SciHub(object):
             
             start += 10
 
-    def download(self, identifier, destination='', path=None):
+    def download(self, identifier, destination='', path=None, title=None):
+      force = False
+      while True:
+        data = self.download_attempt(identifier, destination, path, force, title)
+        if ('err' in data) and ('scihubcaptcha' in data['err']):
+          print data['url'] if 'url' in data else identifier
+          print identifier
+          raw_input('Captcha. Press any key to continue.')
+          force = True
+        else:
+          return data
+      
+    def get_title(self, identifier, title):
+        if not title:
+            r = requests.get(identifier, headers=HEADERS)
+            s2 = self._get_soup(r.content)
+            mct = s2.select_one('meta[name="citation_title"]')
+            if mct: title = mct.get('content')
+            else: title = (s2.find('title').text + '').replace('- PubMed - NCBI', '')
+        return title
+
+    def download_attempt(self, identifier, destination='', path=None, force=False, title=None):
         """
         Downloads a paper from sci-hub given an indentifier (DOI, PMID, URL).
         Currently, this can potentially be blocked by a captcha if a certain
         limit has been reached.
         """
-        data = self.fetch(identifier)
+        
+        data = None
+
+        cachedir = os.path.join(destination, '.cache')
+        if not os.path.exists(cachedir):
+          os.makedirs(cachedir)
+        
+      
+        k = os.path.join(cachedir, hashlib.md5(identifier).hexdigest() + '.json')
+        if not force and os.path.isfile(k):
+          print 'Already downloaded: %s' % identifier
+          
+          data = self._read_json(k)
+          if not 'legacyName' in data and 'name' in data:
+              legacyName = data['name']
+              data['legacyName'] = legacyName 
+              try:
+                 title = self.get_title(identifier, title)
+              except:
+                 return {}
+              newname = self._generate_name_inner(legacyName[:32], title)
+              data['name'] = newname
+              data['title'] = title
+              if os.path.isfile(os.path.join(destination, legacyName)):
+                  os.rename(os.path.join(destination, legacyName), os.path.join(destination, newname))
+              self._write_json(k, data)
+          return {}
+
+        title = self.get_title(identifier, title)
+        
+        data = self.fetch(identifier, title)
+        
+        data['identifier'] = identifier
 
         if not 'err' in data:
             self._save(data['pdf'], 
                        os.path.join(destination, path if path else data['name']))
+        data['pdf'] = ''
+        
+        self._write_json(k, data)
         
         return data
 
-    def fetch(self, identifier):
+    def fetch(self, identifier, title):
         """
         Fetches the paper by first retrieving the direct link to the pdf.
         If the indentifier is a DOI, PMID, or URL pay-wall, then use Sci-Hub
@@ -115,7 +171,9 @@ class SciHub(object):
             return {
                 'pdf': res.content,
                 'url': url,
-                'name': self._generate_name(res)
+				'title': title,
+                'name': self._generate_name(res, title) ,
+				'legacyName': self._generate_name_legacy(res),
             }
         except requests.exceptions.RequestException as e:
             return {
@@ -190,15 +248,24 @@ class SciHub(object):
         """
         return BeautifulSoup(html, 'html.parser')
 
-    def _generate_name(self, res):
+    def _generate_name_legacy(self, res):
         """
         Generate unique filename for paper. Returns a name by calcuating 
         md5 hash of file contents, then appending the last 20 characters
         of the url which typically provides a good paper identifier.
         """
         name = res.url.split('/')[-1]
+        if '?' in name:
+          name =  name[:name.index('?')]
         pdf_hash = hashlib.md5(res.content).hexdigest()
         return '%s-%s' % (pdf_hash, name[-20:])
+
+    def _generate_name(self, res, title):
+        pdf_hash = hashlib.md5(res.content).hexdigest()
+        return self._generate_name_inner(pdf_hash, title)
+
+    def _generate_name_inner(self, pdf_hash, title):
+        return '%s-%s.pdf' % (pdf_hash[16:], re.sub(r'[^a-zA-Z0-9]+', '-', title[:150]).strip('-'))
 
     def _read_json(self, path):
         with open(path, 'r') as infile:
@@ -249,11 +316,14 @@ def main():
         else:
             logger.debug('Successfully completed search with query %s', args.search_download)
             for paper in results['papers']:
-                result = sh.download(paper['url'], args.output)
-                if 'err' in result:
-                    logger.debug('%s', result['err'])
-                else:
-                    logger.debug('Successfully downloaded file with identifier %s', paper['url'])
+                try:
+                    result = sh.download(paper['url'], args.output, title = paper['name'])
+                    if 'err' in result:
+                        logger.debug('%s', result['err'])
+                    else:
+                        logger.debug('Successfully downloaded file with identifier %s', paper['url'])
+                except Exception as e:
+                    logger.debug('Error: %s', e)
     elif args.file:
         with open(args.file, 'r') as f:
             identifiers = f.read().splitlines()
