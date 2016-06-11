@@ -43,6 +43,9 @@ class SciHub(object):
         of results in the form {'papers': ...}. Unfortunately, as of now,
         captchas can potentially prevent searches after a certain limit.
         """
+
+        cachefile = '.cache/search-%s-%s.json' % (query, limit)
+        if os.path.isfile(cachefile): return self._read_json(cachefile)
         start = 0
         results = {'papers': []}
 
@@ -80,6 +83,7 @@ class SciHub(object):
                     })
                     
                     if len(results['papers']) >= limit:
+                        self._write_json(cachefile, results)
                         return results
             
             start += 10
