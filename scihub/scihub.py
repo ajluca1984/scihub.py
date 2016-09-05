@@ -16,7 +16,7 @@ import requests
 import json
 import cookielib
 import urlparse
-
+import urllib
 from bs4 import BeautifulSoup
 
 # for now, suppress warnings due to unverified HTTPS request; this will be fixed
@@ -24,7 +24,7 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 # constants
-SCIHUB_BASE_URL = 'https://sci-hub.cc/'
+SCIHUB_BASE_URL = 'http://sci-hub.cc/'
 SCHOLARS_BASE_URL = 'https://scholar.google.com/scholar'
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
 SCIHUB_CAPTCHA_HTML = '<img id="captcha"'
@@ -35,6 +35,7 @@ class SciHub(object):
     and fetch/download papers from sci-hub.io
     """
     def __init__(self):
+        self.proxies=urllib.getproxies()
         pass
 
     def search(self, query, limit=10, download=False):
@@ -51,7 +52,7 @@ class SciHub(object):
 
         while True:
             try:
-                res = requests.get(SCHOLARS_BASE_URL, params={'q': query, 'start': start}, headers=HEADERS)
+                res = requests.get(SCHOLARS_BASE_URL, params={'q': query, 'start': start}, headers=HEADERS, proxies=self.proxies)
             except requests.exceptions.RequestException as e:
                 results['err'] = 'Failed to complete search with query %s (connection error)' % query
                 return results
@@ -71,7 +72,7 @@ class SciHub(object):
                     link = paper.find('h3', class_='gs_rt')
                     
                     if pdf:
-                        source = pdf.find('div', class_='gs_md_wp gs_ttss').find('a')['href']
+                        source = pdf.find('div', class_='gs_ggsd').find('a')['href']
                     elif link.find('a'):
                         source = link.find('a')['href']
                     else:
@@ -102,7 +103,7 @@ class SciHub(object):
       
     def get_title(self, identifier, title):
         if not title:
-            r = requests.get(identifier, headers=HEADERS)
+            r = requests.get(identifier, headers=HEADERS, proxies=self.proxies)
             s2 = self._get_soup(r.content)
             mct = s2.select_one('meta[name="citation_title"]')
             if mct: title = mct.get('content')
@@ -178,7 +179,7 @@ class SciHub(object):
             # and requests doesn't know how to download them.
             # as a hacky fix, you can add them to your store
             # and verifying would work. will fix this later.
-            res = requests.get(url, headers=HEADERS, verify=False)
+            res = requests.get(url, headers=HEADERS, verify=False, proxies=self.proxies)
             if SCIHUB_CAPTCHA_HTML in res.content:
               return {
                 'err': 'Failed to fetch pdf with identifier %s (resolved url %s) due to %s' 
@@ -213,15 +214,15 @@ class SciHub(object):
         """
         url = identifier
         if 'nlm.nih.gov' in identifier:
-            res = requests.get(identifier, headers=HEADERS)
+            res = requests.get(identifier, headers=HEADERS, proxies=self.proxies)
             s = self._get_soup(res.content)
             a = s.select_one('.portlet a')
             if not a: return
-            url = a.get('href').replace('http://sci-hub.cc/', '').replace('https://sci-hub.cc/', '')
+            url = a.get('href').replace('https://sci-hub.cc/', '').replace('http://sci-hub.cc/', '')
             
         jar = cookielib.CookieJar()
 
-        r2 = requests.get(url if 'scielo.br' in url else SCIHUB_BASE_URL + url, headers=HEADERS, cookies=jar, verify=False)
+        r2 = requests.get(url if 'scielo.br' in url else SCIHUB_BASE_URL + url, headers=HEADERS, cookies=jar, verify=False, proxies=self.proxies)
         if SCIHUB_CAPTCHA_HTML in r2.content: return 'scihubcaptcha'
         s2 = self._get_soup(r2.content)
         iframe = s2.select_one('iframe#pdf')
